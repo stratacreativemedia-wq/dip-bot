@@ -1,0 +1,54 @@
+name: dip-bot
+
+on:
+  schedule:
+    # Times are UTC. Listed for both winter (EST) and summer (EDT); the bot itself checks
+    # New York time and only acts inside its windows (morning 9:31-11:00, afternoon 3:30-3:58).
+    - cron: "33,45 13,14 * * 1-5"         # morning tries
+    - cron: "5,25,45 14,15 * * 1-5"       # morning tries (later, in case GitHub runs late)
+    - cron: "32,38,44,50,55 19,20 * * 1-5" # afternoon tries
+    - cron: "17 12 1 * *"                 # monthly keep-alive (GitHub pauses idle schedules)
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "auto / morning / afternoon / status"
+        default: "status"
+      dry_run:
+        description: "Dry run (no orders)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: dip-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run bot
+        if: github.event.schedule != '17 12 1 * *'
+        env:
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ARGS="${{ inputs.command }}"
+            [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          else
+            ARGS="auto"
+          fi
+          python3 bot.py $ARGS
+      - name: Monthly keep-alive
+        if: github.event.schedule == '17 12 1 * *'
+        run: |
+          date -u > keepalive.txt
+          git config user.name "dip-bot"
+          git config user.email "dip-bot@users.noreply.github.com"
+          git add keepalive.txt
+          git commit -m "keep-alive" && git push
